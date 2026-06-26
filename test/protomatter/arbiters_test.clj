@@ -103,3 +103,97 @@
       (p/post! vp1 :only-one)
       (p/post! gate :beat)
       (is (= [] @received) "vp2 unset — should not fire"))))
+
+;; --- interleave-arb ---
+
+(deftest interleave-concurrent-branch-fires
+  (let [{:keys [received receiver]} (capturing-receiver)
+        cp  (port/make-port [:test :concurrent])
+        ep  (port/make-port [:test :exclusive])
+        tdp (port/make-port [:test :teardown])
+        {td-rcvr :receiver} (capturing-receiver)]
+    (arb/interleave-arb [[cp receiver]] [[ep receiver]] [tdp td-rcvr])
+    (p/post! cp :from-concurrent)
+    (is (= [:from-concurrent] @received))))
+
+(deftest interleave-exclusive-branch-fires
+  (let [{:keys [received receiver]} (capturing-receiver)
+        cp  (port/make-port [:test :concurrent])
+        ep  (port/make-port [:test :exclusive])
+        tdp (port/make-port [:test :teardown])
+        {td-rcvr :receiver} (capturing-receiver)]
+    (arb/interleave-arb [[cp receiver]] [[ep receiver]] [tdp td-rcvr])
+    (p/post! ep :from-exclusive)
+    (is (= [:from-exclusive] @received))))
+
+(deftest teardown-fires-teardown-receiver
+  (let [{:keys [received receiver]} (capturing-receiver)
+        cp  (port/make-port [:test :concurrent])
+        ep  (port/make-port [:test :exclusive])
+        tdp (port/make-port [:test :teardown])
+        {td-received :received td-rcvr :receiver} (capturing-receiver)]
+    (arb/interleave-arb [[cp receiver]] [[ep receiver]] [tdp td-rcvr])
+    (p/post! tdp :beat)
+    (is (= [:beat] @td-received) "teardown receiver fires with teardown port value")))
+
+(deftest teardown-is-total-concurrent-stops
+  (testing "after teardown, posts to concurrent port are ignored"
+    (let [{:keys [received receiver]} (capturing-receiver)
+          cp  (port/make-port [:test :concurrent])
+          ep  (port/make-port [:test :exclusive])
+          tdp (port/make-port [:test :teardown])
+          {td-rcvr :receiver} (capturing-receiver)]
+      (arb/interleave-arb [[cp receiver]] [[ep receiver]] [tdp td-rcvr])
+      (p/post! cp :before)
+      (p/post! tdp :tear-it-down)
+      (p/post! cp :after)
+      (is (= [:before] @received)
+          "concurrent receiver stops after teardown"))))
+
+(deftest teardown-is-total-exclusive-stops
+  (testing "after teardown, posts to exclusive port are ignored"
+    (let [{:keys [received receiver]} (capturing-receiver)
+          cp  (port/make-port [:test :concurrent])
+          ep  (port/make-port [:test :exclusive])
+          tdp (port/make-port [:test :teardown])
+          {td-rcvr :receiver} (capturing-receiver)]
+      (arb/interleave-arb [[cp receiver]] [[ep receiver]] [tdp td-rcvr])
+      (p/post! ep :before)
+      (p/post! tdp :tear-it-down)
+      (p/post! ep :after)
+      (is (= [:before] @received)
+          "exclusive receiver stops after teardown"))))
+
+(deftest teardown-is-one-shot
+  (testing "posting to teardown port twice fires teardown receiver exactly once"
+    (let [cp  (port/make-port [:test :concurrent])
+          ep  (port/make-port [:test :exclusive])
+          tdp (port/make-port [:test :teardown])
+          {td-received :received td-rcvr :receiver} (capturing-receiver)]
+      (arb/interleave-arb [[cp (reify p/IReceiver (activate! [_ _]))]]
+                           [[ep (reify p/IReceiver (activate! [_ _]))]]
+                           [tdp td-rcvr])
+      (p/post! tdp :first-tear)
+      (p/post! tdp :second-tear)
+      (is (= [:first-tear] @td-received)
+          "teardown receiver fires exactly once"))))
+
+(deftest teardown-receiver-can-establish-new-interleave
+  (testing "teardown handler creates new interleave on same port — patch transition"
+    (let [cp       (port/make-port [:test :concurrent])
+          tdp      (port/make-port [:test :teardown])
+          log      (atom [])
+          new-rcvr (reify p/IReceiver
+                     (activate! [_ v] (swap! log conj [:new v])))
+          td-rcvr  (reify p/IReceiver
+                     (activate! [_ _]
+                       ;; Last act: establish new interleave on the same ports
+                       (arb/interleave-arb [[cp new-rcvr]] [] [tdp (reify p/IReceiver (activate! [_ _]))])))]
+      (arb/interleave-arb [[cp (reify p/IReceiver (activate! [_ v] (swap! log conj [:old v])))]]
+                           []
+                           [tdp td-rcvr])
+      (p/post! cp :old-patch-work)
+      (p/post! tdp :transition)
+      (p/post! cp :new-patch-work)
+      (is (= [[:old :old-patch-work] [:new :new-patch-work]] @log)
+          "old interleave fires before teardown, new interleave fires after"))))
