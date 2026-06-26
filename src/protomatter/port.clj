@@ -20,6 +20,7 @@
 
 (deftype Port [path current-val arbiters]
   p/IPort
+  (port-path [_] path)
   (post! [this value]
     (reset! current-val value)
     (run! #(p/notify! % this value) @arbiters))

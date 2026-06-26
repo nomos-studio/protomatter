@@ -10,6 +10,7 @@
   "A named value holder that notifies attached arbiters on post!.
   Holds the most recently posted value (hold-last semantics).
   attach! and detach! must be called within dosync."
+  (port-path     [port]         "Return the path vector this port was created with.")
   (post!         [port value]   "Post a value; update hold-last; notify all attached arbiters.")
   (attach!       [port arbiter] "Attach an arbiter. Caller must be within dosync.")
   (detach!       [port arbiter] "Detach an arbiter. Caller must be within dosync.")
