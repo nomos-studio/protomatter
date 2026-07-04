@@ -1,0 +1,16 @@
+version = 1
+SPDX-PackageName = "protomatter"
+SPDX-PackageSupplier = "rodgert@twrodgers.com"
+SPDX-PackageDownloadLocation = "https://github.com/nomos-studio/protomatter"
+
+[[annotations]]
+path = ["src/**", "test/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025-2026 nomos-studio contributors"
+SPDX-License-Identifier = "EPL-2.0"
+
+[[annotations]]
+path = ["project.clj", ".gitignore", "pom.xml", ".lein-failures"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025-2026 nomos-studio contributors"
+SPDX-License-Identifier = "EPL-2.0"
